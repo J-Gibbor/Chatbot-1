@@ -1,0 +1,15 @@
+{
+  "2347044625110@s.whatsapp.net": {
+    "antidelete": false,
+    "antibadword": false,
+    "antilink": false,
+    "antistatus": false,
+    "antistatus_mention": false,
+    "welcome": false,
+    "goodbye": false,
+    "welcomeText": "👋 Welcome {user} to *{group}*! Enjoy your stay.",
+    "goodbyeText": "🚪 Goodbye {user}! Thanks for being part of *{group}*.",
+    "welcomeImg": null,
+    "goodbyeImg": null
+  }
+}
