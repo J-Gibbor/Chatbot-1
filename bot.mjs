@@ -1056,7 +1056,7 @@ const saveStickerPacks = () =>
 
 // 🔥 FORCE GLOBAL DEFAULT MODE
 if (!SETTINGS["global"]) {
-  SETTINGS["global"] = { mode: "public" }
+  SETTINGS["global"] = { mode: "private" }
   saveSettings()
 }
 
