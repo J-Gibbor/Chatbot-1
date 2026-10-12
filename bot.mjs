@@ -2504,7 +2504,15 @@ function buildViewOncePayload(type, content, buffer, caption, ownerJid) {
     ...(mentions.length ? { mentions } : {})
   };
 }
-// =====================================================
+
+
+    const commands = {
+
+      
+      // ===== MEDIA =====
+
+     
+  // =====================================================
 // COMMAND: VV
 // Send accessible media privately to the owner.
 // =====================================================
@@ -2617,153 +2625,6 @@ viewonce: async () => {
       message: error.message,
       stack: error.stack
     });
-    return reply(
-      "❌ Failed to download media. Check the bot console."
-    );
-  }
-},
-
-    const commands = {
-
-      
-      // ===== MEDIA =====
-
-     vv: async () => {
-  if (!isOwner) {
-    return reply("❌ My owner only");
-  }
-
-  const quoted =
-    msg.message?.extendedTextMessage
-      ?.contextInfo?.quotedMessage;
-
-  if (!quoted) {
-    return reply("❌ Reply to a view-once message");
-  }
-
-  try {
-    const media = unwrapViewOnceMessage(quoted);
-
-    if (!media) {
-      return reply(
-        "❌ Unsupported message structure or media unavailable."
-      );
-    }
-
-    const { type, content } = media;
-
-    const buffer = await downloadViewOnceMedia(
-      content,
-      type
-    );
-
-    const payload = buildViewOncePayload(
-      type,
-      content,
-      buffer,
-      content.caption || "👁️ Accessible media",
-      null
-    );
-
-    // Send to the owner privately.
-    const sent = await sock.sendMessage(sender, payload);
-
-    if (sent) {
-      // Delete the command only after a successful send.
-      try {
-        await sock.sendMessage(jid, {
-          delete: msg.key
-        });
-      } catch (deleteError) {
-        console.error(
-          "VV COMMAND DELETE ERROR:",
-          deleteError.message
-        );
-      }
-    }
-
-  } catch (error) {
-    console.error("VV DOWNLOAD ERROR:", {
-      message: error.message,
-      stack: error.stack
-    });
-
-    return reply(
-      "❌ Download failed. Check the bot console for details."
-    );
-  }
-},
-
-
-// =====================================================
-// COMMAND: VIEWONCE
-// Send accessible media to the current chat.
-// =====================================================
-
-viewonce: async () => {
-  if (!isOwner) {
-    return reply("❌ My owner only");
-  }
-
-  const quoted =
-    msg.message?.extendedTextMessage
-      ?.contextInfo?.quotedMessage;
-
-  if (!quoted) {
-    return reply(
-      "❌ Reply to a supported media message."
-    );
-  }
-
-  try {
-    const media = unwrapViewOnceMessage(quoted);
-
-    if (!media) {
-      return reply(
-        "❌ Unsupported message structure or media unavailable."
-      );
-    }
-
-    const { type, content } = media;
-
-    const buffer = await downloadViewOnceMedia(
-      content,
-      type
-    );
-
-    const ownerJid =
-      Array.isArray(BOT_OWNERS) && BOT_OWNERS.length
-        ? BOT_OWNERS[0]
-        : sender;
-
-    const originalCaption = String(
-      content.caption || ""
-    ).trim();
-
-    const caption = originalCaption
-      ? `👁️ *Revealed by the Master*\n@${ownerJid.split("@")[0]} 🙃\n\n${originalCaption}`
-      : `👁️ *Revealed by the Master*\n@${ownerJid.split("@")[0]} 🙃`;
-
-    const payload = buildViewOncePayload(
-      type,
-      content,
-      buffer,
-      caption,
-      ownerJid
-    );
-
-    await sock.sendMessage(
-      jid,
-      payload,
-      { quoted: msg }
-    );
-
-  } catch (error) {
-    console.error("VIEWONCE DOWNLOAD ERROR:", {
-      message: error.message,
-      stack: error.stack
-    });
-
     return reply(
       "❌ Failed to download media. Check the bot console."
     );
