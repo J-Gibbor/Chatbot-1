@@ -2403,240 +2403,370 @@ if (isDM) {
   console.log("OWNER CHECK:", cleanSender, isOwner)
 }
     
+    // =====================================================
+// VIEW-ONCE HELPERS
+// Compatible with @whiskeysockets/baileys
+// =====================================================
+function unwrapViewOnceMessage(quoted) {
+  if (!quoted) return null;
+  let message = quoted;
+  // Unwrap supported message wrappers
+  for (let i = 0; i < 10; i++) {
+    if (!message || typeof message !== "object") {
+      return null;
+    }
+    if (message.ephemeralMessage?.message) {
+      message = message.ephemeralMessage.message;
+      continue;
+    }
+    if (message.viewOnceMessage?.message) {
+      message = message.viewOnceMessage.message;
+      continue;
+    }
+    if (message.viewOnceMessageV2?.message) {
+      message = message.viewOnceMessageV2.message;
+      continue;
+    }
+    if (message.viewOnceMessageV2Extension?.message) {
+      message = message.viewOnceMessageV2Extension.message;
+      continue;
+    }
+    break;
+  }
+  const supportedTypes = [
+    "imageMessage",
+    "videoMessage",
+    "audioMessage",
+    "documentMessage"
+  ];
+  for (const type of supportedTypes) {
+    if (message[type]) {
+      return {
+        type,
+        content: message[type]
+      };
+    }
+  }
+  return null;
+}
+// =====================================================
+// DOWNLOAD MEDIA
+// =====================================================
+async function downloadViewOnceMedia(content, type) {
+  const mediaType = type.replace("Message", "");
+  const stream = await downloadContentFromMessage(
+    content,
+    mediaType
+  );
+  const chunks = [];
+  for await (const chunk of stream) {
+    chunks.push(chunk);
+  }
+  const buffer = Buffer.concat(chunks);
+  if (!buffer.length) {
+    throw new Error("Downloaded media is empty");
+  }
+  return buffer;
+}
+// =====================================================
+// BUILD MEDIA PAYLOAD
+// =====================================================
+function buildViewOncePayload(type, content, buffer, caption, ownerJid) {
+  const mentions = ownerJid ? [ownerJid] : [];
+  if (type === "imageMessage") {
+    return {
+      image: buffer,
+      caption,
+      ...(mentions.length ? { mentions } : {})
+    };
+  }
+  if (type === "videoMessage") {
+    return {
+      video: buffer,
+      caption,
+      ...(mentions.length ? { mentions } : {})
+    };
+  }
+  if (type === "audioMessage") {
+    return {
+      audio: buffer,
+      mimetype: content.mimetype || "audio/mp4",
+      ptt: Boolean(content.ptt)
+    };
+  }
+  return {
+    document: buffer,
+    mimetype:
+      content.mimetype || "application/octet-stream",
+    fileName:
+      content.fileName || `viewonce_${Date.now()}`,
+    caption,
+    ...(mentions.length ? { mentions } : {})
+  };
+}
+// =====================================================
+// COMMAND: VV
+// Send accessible media privately to the owner.
+// =====================================================
+vv: async () => {
+  if (!isOwner) {
+    return reply("❌ My owner only");
+  }
+  const quoted =
+    msg.message?.extendedTextMessage
+      ?.contextInfo?.quotedMessage;
+  if (!quoted) {
+    return reply("❌ Reply to a view-once message");
+  }
+  try {
+    const media = unwrapViewOnceMessage(quoted);
+    if (!media) {
+      return reply(
+        "❌ Unsupported message structure or media unavailable."
+      );
+    }
+    const { type, content } = media;
+    const buffer = await downloadViewOnceMedia(
+      content,
+      type
+    );
+    const payload = buildViewOncePayload(
+      type,
+      content,
+      buffer,
+      content.caption || "👁️ Accessible media",
+      null
+    );
+    // Send to the owner privately.
+    const sent = await sock.sendMessage(sender, payload);
+    if (sent) {
+      // Delete the command only after a successful send.
+      try {
+        await sock.sendMessage(jid, {
+          delete: msg.key
+        });
+      } catch (deleteError) {
+        console.error(
+          "VV COMMAND DELETE ERROR:",
+          deleteError.message
+        );
+      }
+    }
+  } catch (error) {
+    console.error("VV DOWNLOAD ERROR:", {
+      message: error.message,
+      stack: error.stack
+    });
+    return reply(
+      "❌ Download failed. Check the bot console for details."
+    );
+  }
+},
+// =====================================================
+// COMMAND: VIEWONCE
+// Send accessible media to the current chat.
+// =====================================================
+viewonce: async () => {
+  if (!isOwner) {
+    return reply("❌ My owner only");
+  }
+  const quoted =
+    msg.message?.extendedTextMessage
+      ?.contextInfo?.quotedMessage;
+  if (!quoted) {
+    return reply(
+      "❌ Reply to a supported media message."
+    );
+  }
+  try {
+    const media = unwrapViewOnceMessage(quoted);
+    if (!media) {
+      return reply(
+        "❌ Unsupported message structure or media unavailable."
+      );
+    }
+    const { type, content } = media;
+    const buffer = await downloadViewOnceMedia(
+      content,
+      type
+    );
+    const ownerJid =
+      Array.isArray(BOT_OWNERS) && BOT_OWNERS.length
+        ? BOT_OWNERS[0]
+        : sender;
+    const originalCaption = String(
+      content.caption || ""
+    ).trim();
+    const caption = originalCaption
+      ? `👁️ *Revealed by the Master*\n@${ownerJid.split("@")[0]} 🙃\n\n${originalCaption}`
+      : `👁️ *Revealed by the Master*\n@${ownerJid.split("@")[0]} 🙃`;
+    const payload = buildViewOncePayload(
+      type,
+      content,
+      buffer,
+      caption,
+      ownerJid
+    );
+    await sock.sendMessage(
+      jid,
+      payload,
+      { quoted: msg }
+    );
+  } catch (error) {
+    console.error("VIEWONCE DOWNLOAD ERROR:", {
+      message: error.message,
+      stack: error.stack
+    });
+    return reply(
+      "❌ Failed to download media. Check the bot console."
+    );
+  }
+},
+
     const commands = {
 
       
       // ===== MEDIA =====
 
      vv: async () => {
-  if (!isOwner) return reply("❌ My owner only")
+  if (!isOwner) {
+    return reply("❌ My owner only");
+  }
 
   const quoted =
-    msg.message?.extendedTextMessage?.contextInfo?.quotedMessage
+    msg.message?.extendedTextMessage
+      ?.contextInfo?.quotedMessage;
 
   if (!quoted) {
-    return reply("❌ Reply to a view-once message")
+    return reply("❌ Reply to a view-once message");
   }
 
   try {
-    const type = Object.keys(quoted)[0]
-    const content = quoted[type]
+    const media = unwrapViewOnceMessage(quoted);
 
-    if (!content) return reply("❌ Invalid message")
+    if (!media) {
+      return reply(
+        "❌ Unsupported message structure or media unavailable."
+      );
+    }
 
-    const stream = await downloadContentFromMessage(
+    const { type, content } = media;
+
+    const buffer = await downloadViewOnceMedia(
       content,
-      type.replace("Message", "")
-    )
+      type
+    );
 
-    let buffer = Buffer.from([])
+    const payload = buildViewOncePayload(
+      type,
+      content,
+      buffer,
+      content.caption || "👁️ Accessible media",
+      null
+    );
 
-    for await (const chunk of stream) {
-      buffer = Buffer.concat([buffer, chunk])
-    }
+    // Send to the owner privately.
+    const sent = await sock.sendMessage(sender, payload);
 
-    const caption =
-      content.caption ||
-      content.text ||
-      "👁️ View-once recovered"
-
-    let payload = {}
-
-    if (type === "imageMessage") {
-      payload = { image: buffer, caption }
-
-    } else if (type === "videoMessage") {
-      payload = { video: buffer, caption }
-
-    } else if (type === "audioMessage") {
-      payload = {
-        audio: buffer,
-        mimetype: content.mimetype || "audio/mp4",
-        ptt: content.ptt || false
-      }
-
-    } else {
-      payload = {
-        document: buffer,
-        mimetype: content.mimetype || "application/octet-stream",
-        fileName: content.fileName || "view_once_file"
-      }
-    }
-
-    // 📤 send to owner first
-    const sent = await sock.sendMessage(sender, payload)
-
-    // 💣 DELETE COMMAND ONLY AFTER SUCCESS SEND
     if (sent) {
-      await sock.sendMessage(jid, {
-        delete: msg.key
-      })
+      // Delete the command only after a successful send.
+      try {
+        await sock.sendMessage(jid, {
+          delete: msg.key
+        });
+      } catch (deleteError) {
+        console.error(
+          "VV COMMAND DELETE ERROR:",
+          deleteError.message
+        );
+      }
     }
 
-  } catch (e) {
-    console.log("VV error:", e)
-    reply("❌ Failed to recover view-once media")
+  } catch (error) {
+    console.error("VV DOWNLOAD ERROR:", {
+      message: error.message,
+      stack: error.stack
+    });
+
+    return reply(
+      "❌ Download failed. Check the bot console for details."
+    );
   }
 },
 
-  // 👁️ VIEW-ONCE CONVERTER (turn view-once into normal media)
-// 👁️ VIEW-ONCE CONVERTER (Owner tagged + custom reveal caption)
+
+// =====================================================
+// COMMAND: VIEWONCE
+// Send accessible media to the current chat.
+// =====================================================
+
 viewonce: async () => {
   if (!isOwner) {
-    return reply("❌ My owner only")
+    return reply("❌ My owner only");
   }
 
-  // 📩 Must reply to a view-once message
   const quoted =
     msg.message?.extendedTextMessage
-      ?.contextInfo?.quotedMessage
+      ?.contextInfo?.quotedMessage;
 
   if (!quoted) {
     return reply(
-      "❌ Reply to a view-once image/video/audio"
-    )
+      "❌ Reply to a supported media message."
+    );
   }
 
   try {
+    const media = unwrapViewOnceMessage(quoted);
 
-    // 👑 Owner mention target
-    const ownerJid =
-      Array.isArray(BOT_OWNERS) &&
-      BOT_OWNERS.length
-        ? BOT_OWNERS[0]
-        : sender
-
-    // 🔍 Detect message type
-    let type = Object.keys(quoted)[0]
-    let content = quoted[type]
-
-    // 🛡️ Handle wrapped viewOnce
-    if (type === "viewOnceMessage") {
-      const inner =
-        content?.message
-
-      type = Object.keys(inner || {})[0]
-      content = inner?.[type]
-    }
-
-    if (!content || !type) {
+    if (!media) {
       return reply(
-        "❌ Invalid or unsupported view-once"
-      )
+        "❌ Unsupported message structure or media unavailable."
+      );
     }
 
-    // 📥 Download hidden media
-    const stream =
-      await downloadContentFromMessage(
-        content,
-        type.replace("Message", "")
-      )
+    const { type, content } = media;
 
-    let buffer = Buffer.from([])
+    const buffer = await downloadViewOnceMedia(
+      content,
+      type
+    );
 
-    for await (const chunk of stream) {
-      buffer = Buffer.concat([
-        buffer,
-        chunk
-      ])
-    }
+    const ownerJid =
+      Array.isArray(BOT_OWNERS) && BOT_OWNERS.length
+        ? BOT_OWNERS[0]
+        : sender;
 
-    // 📝 Original caption
-    const originalCaption =
-      String(
-        content.caption ||
-        content.text ||
-        ""
-      ).trim()
+    const originalCaption = String(
+      content.caption || ""
+    ).trim();
 
-    // 👁️ Custom reveal caption
-    const finalCaption =
-      originalCaption
-        ? `👁️ *Reaveled By The Master*\n@${ownerJid.split("@")[0]} For You 🙃\n\n${originalCaption}`
-        : `👁️ *Reaveled By The Master*\n@${ownerJid.split("@")[0]} For You 🙃`
+    const caption = originalCaption
+      ? `👁️ *Revealed by the Master*\n@${ownerJid.split("@")[0]} 🙃\n\n${originalCaption}`
+      : `👁️ *Revealed by the Master*\n@${ownerJid.split("@")[0]} 🙃`;
 
-    // 📤 Build payload
-    let payload = {}
+    const payload = buildViewOncePayload(
+      type,
+      content,
+      buffer,
+      caption,
+      ownerJid
+    );
 
-    // 🖼️ IMAGE
-    if (type === "imageMessage") {
-      payload = {
-        image: buffer,
-        caption: finalCaption,
-        mentions: [ownerJid]
-      }
-
-    // 🎥 VIDEO
-    } else if (
-      type === "videoMessage"
-    ) {
-      payload = {
-        video: buffer,
-        caption: finalCaption,
-        mentions: [ownerJid]
-      }
-
-    // 🔊 AUDIO / VOICE
-    } else if (
-      type === "audioMessage"
-    ) {
-      payload = {
-        audio: buffer,
-        mimetype:
-          content.mimetype ||
-          "audio/mp4",
-        ptt:
-          content.ptt || false
-      }
-
-    // 📄 DOCUMENT
-    } else {
-      payload = {
-        document: buffer,
-        mimetype:
-          content.mimetype ||
-          "application/octet-stream",
-        fileName:
-          content.fileName ||
-          `viewonce_${Date.now()}`,
-        caption: finalCaption,
-        mentions: [ownerJid]
-      }
-    }
-
-    // 📬 Send recovered version
     await sock.sendMessage(
       jid,
       payload,
       { quoted: msg }
-    )
+    );
 
-    // 🧹 Delete command after 4s
-    // setTimeout(async () => {
-    //   try {
-    //     await sock.sendMessage(
-    //       jid,
-    //       {
-    //         delete: msg.key
-    //       }
-    //     )
-    //   } catch (e) {
-    //     console.log(
-    //       "VIEWONCE DELETE ERROR:",
-    //       e
-    //     )
-    //   }
-    // }, 4000)
+  } catch (error) {
+    console.error("VIEWONCE DOWNLOAD ERROR:", {
+      message: error.message,
+      stack: error.stack
+    });
 
-  } catch (e) {
-    console.log(
-      "VIEWONCE ERROR:",
-      e
-    )
-
-    reply(
-      "❌ Failed to convert view-once"
-    )
+    return reply(
+      "❌ Failed to download media. Check the bot console."
+    );
   }
 },
 
